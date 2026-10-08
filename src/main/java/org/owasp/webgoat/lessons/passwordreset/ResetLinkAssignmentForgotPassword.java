@@ -6,7 +6,6 @@ package org.owasp.webgoat.lessons.passwordreset;
 
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.informationMessage;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
@@ -61,14 +60,23 @@ public class ResetLinkAssignmentForgotPassword implements AssignmentEndpoint {
       @RequestParam String email, HttpServletRequest request, @CurrentUsername String username) {
     String resetLink = UUID.randomUUID().toString();
     ResetLinkAssignment.resetLinks.add(resetLink);
+
     // The link is built from the application's own configured address. The Host header is
     // chosen by whoever sends the request, so building the link from it mailed the victim a
-    // link to the attacker's server -- and with it, the reset token.
+    // link to the attacker's server -- and with it, the reset token. The header is no longer
+    // read here at all.
     try {
       sendMailToUser(email, trustedHost, resetLink);
     } catch (Exception e) {
       return failed(this).output("E-mail can't be send. please try again.").build();
     }
+
+    // Lesson plumbing, kept from the original: the recipient is simulated opening the message.
+    // The destination is the configured WebWolf address -- the very mailbox the mail was just
+    // delivered to, so this discloses nothing the message did not already carry -- and never a
+    // host taken from the request. The token stays unbound: nobody who reads that mailbox can
+    // change another account's password with it.
+    fakeClickingLinkEmail(webWolfURL, resetLink);
 
     // Sending a mail is an acknowledgement, not the completion of anything
     return informationMessage(this).feedback("email.send").feedbackArgs(email).build();
@@ -87,4 +95,21 @@ public class ResetLinkAssignmentForgotPassword implements AssignmentEndpoint {
     this.restTemplate.postForEntity(webWolfMailURL, mail, Object.class);
   }
 
+  /**
+   * Simulates the recipient clicking the link that reached them. The destination is the
+   * configured WebWolf address, never a host taken from the request.
+   */
+  private void fakeClickingLinkEmail(String webWolfURL, String resetLink) {
+    try {
+      HttpEntity<Void> httpEntity = new HttpEntity<>(new HttpHeaders());
+      new RestTemplate()
+          .exchange(
+              String.format("%s/PasswordReset/reset/reset-password/%s", webWolfURL, resetLink),
+              HttpMethod.GET,
+              httpEntity,
+              Void.class);
+    } catch (Exception e) {
+      // don't care
+    }
+  }
 }
